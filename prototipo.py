@@ -10,7 +10,7 @@ GPIO.setwarnings(False)
 import struct
 import serial
 import smtplib
-import config
+import configMio as config
 import os
 import csv
 import urllib.request
@@ -47,7 +47,6 @@ class Sensor():
     def __init__(self):
         try:
             self.connect()
-            dic = self.getData()
         except:
             Interruptor.apagar(21)
             Interruptor.prender(20)
@@ -57,6 +56,7 @@ class Sensor():
         try:
             DHT22(board.D17, dic = self.getData())
             SDS011(dic = self.getData())            
+            SGP30(bus = 1, dic = self.getData())
             SGP30(bus = 6, dic = self.getData())
         except:
             Interruptor.apagar(21)
@@ -222,24 +222,67 @@ class Adafruit():
          
   
 class SGP30(Sensor):    
+  
     def __init__(self, bus, dic):
+        if 'eco' in dic:
+            self.initSuma(bus, dic)
+        else:
+            self.initDic(bus, dic)
+    
+    def initSuma(self, bus, dic):
         try:
             sensor = self.connect(bus)
             self.read(sensor)
         except:
-            Prototipo.correo("No se puede conectar con el sensor SGP30")
+            mensaje = "no se puede conectar con el sensor SGP30 en bus "+ str(bus)
+            Prototipo.correo(mensaje)
+            self.setEco2(0)
+            self.setTvoc(0)
+        try:
+            self.promedio(dic)
+        except:
+            Prototipo.correo("La lectura de ambos sesores SGP30 fallo")
             self.setEco2("Fail")
-            self.setTvoc("Fail")        
+            self.setTvoc("Fail")
         self.dic(dic)
         
+    def initDic(self, bus, dic):
+        try:
+            sensor = self.connect(bus)
+            self.read(sensor)
+        except:
+            mensaje = "no se puede conectar con el sensor SGP30 en bus "+ str(bus)
+            Prototipo.correo(mensaje)
+            self.setEco2(0)
+            self.setTvoc(0)
+        self.dic(dic)
+        
+    def promedio(self,dic):
+        eco2 = dic.pop('eco')
+        eco2 += self.getEco2()
+        eco2 = eco2/2
+        if eco2 == 0:
+            raise Exception("Both SGP30 sensor readings Fail.")       
+        tvoc = dic.pop('tvoc')
+        tvoc += self.getTvoc()
+        tvoc = tvoc/2
+        if eco2 < 400:
+            eco2 *=2
+            tvoc *=2
+        self.setEco2(round(eco2))
+        self.setTvoc(round(tvoc))
+    
     def connect(self, bus):
         if bus == 1:
             i2c = busio.I2C(board.SCL, board.SDA, frequency=100000)
         if bus == 6:
             i2c = busio.I2C(board.D1, board.D0, frequency=100000)
         sgp30 = adafruit_sgp30.Adafruit_SGP30(i2c)
-        sgp30.iaq_init()        
-        sgp30.set_iaq_baseline(config.calibradoCO2, config.calibradoTvoc)
+        sgp30.iaq_init()
+        if bus == 1:
+            sgp30.set_iaq_baseline(config.calibradoCO21, config.calibradoTvoc1)
+        if bus == 6:
+            sgp30.set_iaq_baseline(config.calibradoCO26, config.calibradoTvoc6)
         return sgp30
     
     def read(self, s):
@@ -256,11 +299,14 @@ class SGP30(Sensor):
             count += 1
             if count > 10:
                 count = 0
-                s.set_iaq_baseline(38815, 39046)
+                if bus == 1:
+                    s.set_iaq_baseline(config.calibradoCO21, config.calibradoTvoc1)
+                if bus == 6:
+                    s.set_iaq_baseline(config.calibradoCO26, config.calibradoTvoc6)
                 i += 1
         if i >= 3:
-            self.setEco2("Fail")
-            self.setTvoc("Fail")
+            self.setEco2(0)
+            self.setTvoc(0)
                 
     
     def getEco2(self):
